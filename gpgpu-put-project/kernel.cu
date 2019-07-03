@@ -6,10 +6,12 @@
 #include <vector> 
 #include <algorithm> 
 
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+
 #define SEQ_SIZE 9
 #define PATTERN_SIZE 4
 
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
 
 __global__ void addKernel(int *c, const int *a, const int *b)
 {
@@ -27,12 +29,21 @@ std::vector<T>* getUniqueValues(std::vector<T>* input) {
 	return uniqueValues;
 }
 
-int variations_without_repetitions_count(int n, int k) {
+template<typename T>
+thrust::host_vector<T>* getHostVector(std::vector<T>* input) {
+	thrust::host_vector<T>* host_vector = new thrust::host_vector<T>();
+	for (auto it = input->begin(); it != input->end(); ++it) {
+		host_vector->push_back(*it);
+	}
+	return host_vector;
+}
+
+unsigned long long variations_without_repetitions_count(int n, int k) {
 	if (k > n) {
 		return 1;
 	}
 
-	int result = 1;
+	unsigned long long result = 1;
 	for (int i = n; i > n - k; i--) {
 		result *= i;
 	}
@@ -49,10 +60,14 @@ int main()
 	std::vector<int> seq = { 1,2, 4, 3, 5, 3, 6, 2, 1 };
 	std::vector<char> pattern = { 'a', 'b', 'b', 'a' };
 
-	auto patternValues = getUniqueValues(&pattern);
-	auto seqValues = getUniqueValues(&seq);
+	thrust::host_vector<char>* patternValues = getHostVector(getUniqueValues(&pattern));
+	thrust::host_vector<int>* seqValues = getHostVector(getUniqueValues(&seq));
 
-	std::cout << variations_without_repetitions_count(12, 15);
+	/*for (auto it = patternValues->begin(); it != patternValues->end(); ++it) {
+		std::cout << *it;
+	}*/
+
+	std::cout << variations_without_repetitions_count(15, 12);
 
 	free(seqValues);
 	free(patternValues);
