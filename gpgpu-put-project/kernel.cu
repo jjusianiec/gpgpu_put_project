@@ -19,6 +19,13 @@ __global__ void addKernel(int *c, const int *a, const int *b)
     c[i] = a[i] + b[i];
 }
 
+__global__ void multiplyBy2(int* data, unsigned int n) {
+	unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x; 
+	if (tid < n) { 
+		data[tid] = 2 * data[tid]; 
+	} 
+}
+
 template<typename T>
 std::vector<T>* getUniqueValues(std::vector<T>* input) {
 	std::vector<T>* uniqueValues = new std::vector<T>(*input);
@@ -63,11 +70,22 @@ int main()
 	thrust::host_vector<char>* patternValues = getHostVector(getUniqueValues(&pattern));
 	thrust::host_vector<int>* seqValues = getHostVector(getUniqueValues(&seq));
 
-	/*for (auto it = patternValues->begin(); it != patternValues->end(); ++it) {
-		std::cout << *it;
-	}*/
+	thrust::device_vector<char>* devicePatternValues = new thrust::device_vector<char>();
+	thrust::device_vector<int>* deviceSeqValues = new thrust::device_vector<int>();
 
-	std::cout << variations_without_repetitions_count(15, 12);
+	deviceSeqValues->resize(seqValues->size());
+
+	*deviceSeqValues = *seqValues;
+
+	multiplyBy2 <<< 1, 10 >>> (deviceSeqValues->data().get(), deviceSeqValues->size());
+
+	*seqValues = *deviceSeqValues;
+
+	for (auto it = seqValues->begin(); it != seqValues->end(); ++it) {
+		std::cout << *it;
+	}
+
+	//std::cout << variations_without_repetitions_count(15, 12);
 
 	free(seqValues);
 	free(patternValues);
