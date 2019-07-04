@@ -45,46 +45,7 @@ thrust::host_vector<T>* getHostVector(std::vector<T>* input) {
 	return host_vector;
 }
 
-unsigned long long variations_without_repetitions_count(int n, int k) {
-	if (k > n) {
-		return 1;
-	}
-
-	unsigned long long result = 1;
-	for (int i = n; i > n - k; i--) {
-		result *= i;
-	}
-
-	return result;
-}
-
-void variation(int n, int k, int variationNumber, int* result) {
-	bool* isTaken = new bool[n];
-	for (int i = 0; i < n; i++) {
-		isTaken[i] = false;
-	}
-	for (int x = 0; x < k; x++) {
-		unsigned long long v = variations_without_repetitions_count(n - x - 1, k - x - 1);
-		auto t = variationNumber / v;
-		int searchedPosition = -1;
-		int realPosition = 0;
-		for (int i = 0; i < n; i++) {
-			if (!isTaken[i]) {
-				searchedPosition++;
-				if (t == searchedPosition) {
-					realPosition = i;
-					break;
-				}
-			}
-
-		}
-		isTaken[realPosition] = true;
-		result[x] = realPosition;
-		variationNumber %= v;
-	}
-}
-
-__device__ void variations_without_repetitions_count_dev(int n, int k, unsigned long long* result) {
+__host__ __device__ void variations_without_repetitions_count(int n, int k, unsigned long long* result) {
 	if (k > n) {
 		*result = 1;
 		return;
@@ -96,14 +57,14 @@ __device__ void variations_without_repetitions_count_dev(int n, int k, unsigned 
 	}
 }
 
-__device__ void variation_dev(int n, int k, int variationNumber, int* result) {
+__host__ __device__ void variation(int n, int k, int variationNumber, int* result) {
 	bool* isTaken = new bool[n];
 	for (int i = 0; i < n; i++) {
 		isTaken[i] = false;
 	}
 	for (int x = 0; x < k ; x++) {
 		unsigned long long v = 0;
-		variations_without_repetitions_count_dev(n - x - 1, k - x - 1, &v);
+		variations_without_repetitions_count(n - x - 1, k - x - 1, &v);
 		auto t = variationNumber / v;
 		int searchedPosition = -1;
 		int realPosition = 0;
@@ -134,7 +95,7 @@ __global__ void findSubstitution(
 	if (index > variationCount) return;
 	
 	int* variationResult = new int[patternValuesSize];
-	variation_dev(seqValuesSize, patternValuesSize, index, variationResult);
+	variation(seqValuesSize, patternValuesSize, index, variationResult);
 
 	int* patternWithValues = new int[patternSize];
 	for (int i = 0; i < patternValuesSize; i++) {
@@ -161,11 +122,8 @@ __global__ void findSubstitution(
 
 int main()
 {  
-	// 124353621
-    //const int seq[SEQ_SIZE] = { 1,2, 4, 3, 5, 3, 6, 2, 1 };
-    //const char pattern[PATTERN_SIZE] = { 'a', 'b', 'b', 'a' };
-	std::vector<int> seq = { 1,2, 4, 3, 5, 3, 6, 2, 1 };       // sorted 1 2 3 4 5 6 
-	std::vector<char> pattern = { 'a', 'b', 'b', 'a' };        // index: 0 1 2 3 4 5
+	std::vector<int> seq = { 1,2, 4, 3, 5, 3, 6, 2, 1 };
+	std::vector<char> pattern = { 'a', 'b', 'b', 'a' };
 
 	thrust::host_vector<char>* patternValues = getHostVector(getUniqueValues(&pattern));
 	thrust::host_vector<char>* thrustPattern = getHostVector(&pattern);
@@ -180,17 +138,8 @@ int main()
 	thrust::device_vector<int>* devThrustSeq = new thrust::device_vector<int>();
 	thrust::device_vector<int>* devResult = new thrust::device_vector<int>();
 
-	//for (int i = 0; i < variations_without_repetitions_count(seqValues->size(), patternValues->size()); i++) {
-	//	int* result = new int[patternValues->size()];
-	//	variation(seqValues->size(), patternValues->size(), i, result);
-	//	for (int j = 0; j < patternValues->size(); j++) {
-	//		//std::cout << (*seqValues)[result[j]];
-	//		std::cout << result[j];
-	//	}
-	//	std::cout << std::endl;
-	//}
-
-	unsigned long long variationCount = variations_without_repetitions_count(seqValues->size(), patternValues->size());
+	unsigned long long variationCount = 0;
+	variations_without_repetitions_count(seqValues->size(), patternValues->size(), &variationCount);
 	int gridSize = variationCount / BLOCK_SIZE;
 	if (gridSize < 1) {
 		gridSize = 1;
@@ -227,75 +176,17 @@ int main()
 
 	*result = *devResult;
 
-	/*for (int i = 0; i < seqValues->size(); i++) {
-		std::cout << (*seqValues)[i] << " ";
-	}
-	std::cout << std::endl;*/
-
 	for (int i = 0; i < result->size(); i++) {
 		if ((*result)[i] != 0) {
 			int* variationResult = new int[patternValues->size()];
 			variation(seqValues->size(), patternValues->size(), i, variationResult);
-			//std::cout << (*result)[i] << std::endl;
 			for (int i = 0; i < patternValues->size(); i++) {
 				std::cout << (*patternValues)[i] << "=" << (*seqValues)[variationResult[i]] << " ";
 			}
-			/*for (int j = 0; j < patternValues->size(); j++) {
-				for (int k = 0; k < pattern.size(); k++) {
-					if (pattern[k] == (*patternValues)[j]) {
-						std::cout << (*seqValues)[j] << " ";
-					}
-				}
-			}*/
 			std::cout << std::endl;
 		}
 	}
 
-
-	//thrust::device_vector<char>* devicePatternValues = new thrust::device_vector<char>();
-	//thrust::device_vector<int>* deviceSeqValues = new thrust::device_vector<int>();
-
-	//deviceSeqValues->resize(seqValues->size());
-
-	//*deviceSeqValues = *seqValues;
-
-	//multiplyBy2 <<< 1, 10 >>> (deviceSeqValues->data().get(), deviceSeqValues->size());
-	//cudaError_t err = cudaGetLastError();
-	//if (err != cudaSuccess) {
-	//	std::cout << "cuda error: " << cudaGetErrorString(err) << std::endl;
-	//	return 1;
-	//}
-
-	//*seqValues = *deviceSeqValues;
-
-	//for (auto it = seqValues->begin(); it != seqValues->end(); ++it) {
-	//	std::cout << *it;
-	//}
-
-
-
-	//std::cout << variations_without_repetitions_count(seqValues->size(), patternValues->size()) << std::endl;
-	//std::cout << variations_without_repetitions_count(4, 3);
-
-	//free(seqValues);
-	//free(patternValues);
-    //// Add vectors in parallel.
-    //cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-    //if (cudaStatus != cudaSuccess) {
-    //    fprintf(stderr, "addWithCuda failed!");
-    //    return 1;
-    //}
-
-    //printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-    //    c[0], c[1], c[2], c[3], c[4]);
-
-    //// cudaDeviceReset must be called before exiting in order for profiling and
-    //// tracing tools such as Nsight and Visual Profiler to show complete traces.
-    //cudaStatus = cudaDeviceReset();
-    //if (cudaStatus != cudaSuccess) {
-    //    fprintf(stderr, "cudaDeviceReset failed!");
-    //    return 1;
-    //}
 
     return 0;
 }
