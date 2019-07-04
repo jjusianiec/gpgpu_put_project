@@ -58,6 +58,32 @@ unsigned long long variations_without_repetitions_count(int n, int k) {
 	return result;
 }
 
+void variation(int n, int k, int variationNumber, int* result) {
+	bool* isTaken = new bool[n];
+	for (int i = 0; i < n; i++) {
+		isTaken[i] = false;
+	}
+	for (int x = 0; x < k; x++) {
+		unsigned long long v = variations_without_repetitions_count(n - x - 1, k - x - 1);
+		auto t = variationNumber / v;
+		int searchedPosition = -1;
+		int realPosition = 0;
+		for (int i = 0; i < n; i++) {
+			if (!isTaken[i]) {
+				searchedPosition++;
+				if (t == searchedPosition) {
+					realPosition = i;
+					break;
+				}
+			}
+
+		}
+		isTaken[realPosition] = true;
+		result[x] = realPosition;
+		variationNumber %= v;
+	}
+}
+
 __device__ void variations_without_repetitions_count_dev(int n, int k, unsigned long long* result) {
 	if (k > n) {
 		*result = 1;
@@ -70,7 +96,7 @@ __device__ void variations_without_repetitions_count_dev(int n, int k, unsigned 
 	}
 }
 
-__device__ void variation(int n, int k, int variationNumber, int* result) {
+__device__ void variation_dev(int n, int k, int variationNumber, int* result) {
 	bool* isTaken = new bool[n];
 	for (int i = 0; i < n; i++) {
 		isTaken[i] = false;
@@ -97,7 +123,6 @@ __device__ void variation(int n, int k, int variationNumber, int* result) {
 	}
 }
 
-
 __global__ void findSubstitution(
 	char* patternValues, int patternValuesSize, 
 	int* seqValues, int seqValuesSize, 
@@ -109,7 +134,29 @@ __global__ void findSubstitution(
 	if (index > variationCount) return;
 	
 	int* variationResult = new int[patternValuesSize];
-	variation(seqValuesSize, patternValuesSize, index, variationResult);
+	variation_dev(seqValuesSize, patternValuesSize, index, variationResult);
+
+	int* patternWithValues = new int[patternSize];
+	for (int i = 0; i < patternValuesSize; i++) {
+		for (int j = 0; j < patternSize; j++) {
+			if (patternValues[i] == pattern[j]) {
+				patternWithValues[j] = seqValues[variationResult[i]];
+			}
+		}
+	}
+	
+	int patternIndex = 0;
+	for (int i = 0; i < seqSize && patternIndex < patternSize; i++) {
+		if (seq[i] == patternWithValues[patternIndex]) {
+			patternIndex++;
+		}
+	}
+	if (patternIndex == patternSize) {
+		result[index] = 1;
+	}
+	else {
+		result[index] = 0;
+	}
 }
 
 int main()
@@ -117,18 +164,21 @@ int main()
 	// 124353621
     //const int seq[SEQ_SIZE] = { 1,2, 4, 3, 5, 3, 6, 2, 1 };
     //const char pattern[PATTERN_SIZE] = { 'a', 'b', 'b', 'a' };
-	std::vector<int> seq = { 1,2, 4, 3, 5, 3, 6, 2, 1 };
-	std::vector<char> pattern = { 'a', 'b', 'b', 'a' };
+	std::vector<int> seq = { 1,2, 4, 3, 5, 3, 6, 2, 1 };       // sorted 1 2 3 4 5 6 
+	std::vector<char> pattern = { 'a', 'b', 'b', 'a' };        // index: 0 1 2 3 4 5
 
 	thrust::host_vector<char>* patternValues = getHostVector(getUniqueValues(&pattern));
 	thrust::host_vector<char>* thrustPattern = getHostVector(&pattern);
 	thrust::host_vector<int>* seqValues = getHostVector(getUniqueValues(&seq));
 	thrust::host_vector<int>* thrustSeq = getHostVector(&seq);
+	thrust::host_vector<int>* result = new thrust::host_vector<int>();
+	
 
 	thrust::device_vector<char>* devPatternValues = new thrust::device_vector<char>();
 	thrust::device_vector<char>* devThrustPattern = new thrust::device_vector<char>();
 	thrust::device_vector<int>* devSeqValues = new thrust::device_vector<int>();
 	thrust::device_vector<int>* devThrustSeq = new thrust::device_vector<int>();
+	thrust::device_vector<int>* devResult = new thrust::device_vector<int>();
 
 	//for (int i = 0; i < variations_without_repetitions_count(seqValues->size(), patternValues->size()); i++) {
 	//	int* result = new int[patternValues->size()];
@@ -145,30 +195,62 @@ int main()
 	if (gridSize < 1) {
 		gridSize = 1;
 	}
-	int* result = new int[variationCount];
+	
 
 	devPatternValues->resize(patternValues->size());
 	devThrustPattern->resize(thrustPattern->size());
 	devSeqValues->resize(seqValues->size());
 	devThrustSeq->resize(thrustSeq->size());
 
+	result->resize(variationCount);
+	devResult->resize(variationCount);
+
 	*devPatternValues = *patternValues;
 	*devThrustPattern = *thrustPattern;
 	*devSeqValues = *seqValues;
 	*devThrustSeq = *thrustSeq;
+	*devResult = *result;
 
 	findSubstitution <<< gridSize, BLOCK_SIZE >>> (
 		devPatternValues->data().get(), devPatternValues->size(),
 		devSeqValues->data().get(), devSeqValues->size(),
 		devThrustPattern->data().get(), devThrustPattern->size(),
 		devThrustSeq->data().get(), devThrustSeq->size(),
-		result, variationCount);
+		devResult->data().get(), variationCount);
 
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) {
 		std::cout << "cuda error: " << cudaGetErrorString(err) << std::endl;
 		return 1;
 	}
+
+
+	*result = *devResult;
+
+	/*for (int i = 0; i < seqValues->size(); i++) {
+		std::cout << (*seqValues)[i] << " ";
+	}
+	std::cout << std::endl;*/
+
+	for (int i = 0; i < result->size(); i++) {
+		if ((*result)[i] != 0) {
+			int* variationResult = new int[patternValues->size()];
+			variation(seqValues->size(), patternValues->size(), i, variationResult);
+			//std::cout << (*result)[i] << std::endl;
+			for (int i = 0; i < patternValues->size(); i++) {
+				std::cout << (*patternValues)[i] << "=" << (*seqValues)[variationResult[i]] << " ";
+			}
+			/*for (int j = 0; j < patternValues->size(); j++) {
+				for (int k = 0; k < pattern.size(); k++) {
+					if (pattern[k] == (*patternValues)[j]) {
+						std::cout << (*seqValues)[j] << " ";
+					}
+				}
+			}*/
+			std::cout << std::endl;
+		}
+	}
+
 
 	//thrust::device_vector<char>* devicePatternValues = new thrust::device_vector<char>();
 	//thrust::device_vector<int>* deviceSeqValues = new thrust::device_vector<int>();
